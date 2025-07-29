@@ -24,7 +24,7 @@ def refine_mask(masks):
     return masks
 
 class ObjectDetectionMasking:
-    def __init__(self, pointcloud_name, image_name):
+    def __init__(self, pointcloud_name, image_name, visualize=False):
         # load model
         self.device = "cuda"
 
@@ -53,6 +53,8 @@ class ObjectDetectionMasking:
         self.points_rgb_frame = None
         self.header = None
         self.processing = False
+        self.visualize = visualize
+        self.num_result = 0
 
     def sync_callback(self, img_msg, pc_msg):
         if self.processing:
@@ -86,24 +88,26 @@ class ObjectDetectionMasking:
             if("cup" in labels):
                 print(f"Detected {labels} with confidence {round(score.item(), 3)} at location {box}")
 
-                uvs = project(self.points_rgb_frame[:,:3], K, dist_coeffs)
-                uvs = np.round(uvs).astype(np.int32)
-                min = np.min(uvs, axis=0)
-                max = np.max(uvs, axis=0)
-                uvs -= min
-                projected_img = np.zeros((max[1]-min[1]+1, max[0]-min[0]+1, 3), dtype=np.float32)
-                for uv, rgb in zip(uvs, self.points_rgb_frame[:,3:]):
-                    projected_img[uv[1], uv[0]] = rgb
-                fig, axes = plt.subplots(2, 1)
-                axes[0].imshow(self.image)
-                axes[0].add_patch(plt.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], fill=False, color="red", linewidth=2))
-                axes[1].imshow(projected_img)
-                axes[1].axhline(-min[1])
-                axes[1].axhline(720-min[1])
-                axes[1].axvline(-min[0])
-                axes[1].axvline(1280-min[0])
-                axes[1].add_patch(plt.Rectangle((box[0]-min[0], box[1]-min[1]), box[2] - box[0], box[3] - box[1], fill=False, color="red", linewidth=2))
-                plt.show()
+                if self.visualize:
+                    uvs = project(self.points_rgb_frame[:,:3], K, dist_coeffs)
+                    uvs = np.round(uvs).astype(np.int32)
+                    min = np.min(uvs, axis=0)
+                    max = np.max(uvs, axis=0)
+                    uvs -= min
+                    projected_img = np.zeros((max[1]-min[1]+1, max[0]-min[0]+1, 3), dtype=np.float32)
+                    for uv, rgb in zip(uvs, self.points_rgb_frame[:,3:]):
+                        projected_img[uv[1], uv[0]] = rgb
+                    fig, axes = plt.subplots(2, 1)
+                    axes[0].imshow(self.image)
+                    axes[0].add_patch(plt.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], fill=False, color="red", linewidth=2))
+                    axes[1].imshow(projected_img)
+                    axes[1].axhline(-min[1])
+                    axes[1].axhline(720-min[1])
+                    axes[1].axvline(-min[0])
+                    axes[1].axvline(1280-min[0])
+                    axes[1].add_patch(plt.Rectangle((box[0]-min[0], box[1]-min[1]), box[2] - box[0], box[3] - box[1], fill=False, color="red", linewidth=2))
+                    plt.savefig(f'plots/result_{self.num_result}.png')
+                    self.num_result += 1
                 
                 inputs = self.sam_processor(images = self.image, input_boxes=[[[box]]], return_tensors="pt").to(self.device)
                 with torch.no_grad():
@@ -118,6 +122,7 @@ class ObjectDetectionMasking:
 
                 points_uv = project(self.points_rgb_frame[:,:3], K, dist_coeffs)
                 points_uv = points_uv.astype(np.int32)
+                points_uv = points_uv.clip([0, 0], [1279, 719])
                 mask = segmentation_mask[points_uv[:,1], points_uv[:,0]]
                 # mask = (points_uv[:,0] > box[0]) & (points_uv[:,0] < box[2]) \
                 #      & (points_uv[:,1] > box[1]) & (points_uv[:,1] < box[3])
